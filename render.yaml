@@ -21,6 +21,3 @@ services:
       - key: VITE_API_BASE_URL
         value: https://health-doc-cms-api.onrender.com
 
-databases:
-  - name: health-doc-cms-db
-    plan: starter

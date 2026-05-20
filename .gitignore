@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build outputs
+frontend/dist/
+frontend/public/tinymce/
+backend/storage/exports/*
+!backend/storage/exports/.gitkeep
+
+# Local environment
+.env
+.env.local
+*.log
+.DS_Store
+
+# Runtime storage
+storage/

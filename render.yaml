@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: health-doc-cms-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: CORS_ALLOW_ORIGINS
+        value: https://health-doc-cms-web.onrender.com
+
+  - type: web
+    name: health-doc-cms-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: pnpm install --frozen-lockfile && rm -rf public/tinymce && mkdir -p public/tinymce && cp -R node_modules/tinymce/* public/tinymce/ && pnpm build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://health-doc-cms-api.onrender.com
+
+databases:
+  - name: health-doc-cms-db
+    plan: starter

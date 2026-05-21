@@ -115,6 +115,7 @@ const sectionSeed: Section[] = [
 ]
 
 const workflowSteps = ['Draft', '508 preflight', 'Compliance review', 'Export package']
+const tinymceApiKey = import.meta.env.VITE_TINYMCE_API_KEY as string | undefined
 
 function textOnly(html: string) {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -275,7 +276,8 @@ function App() {
             <p className="instruction">Use semantic headings, accessible tables, descriptive links, and approved CMS insertions. The editor restricts formatting patterns that commonly break downstream 508/PDF quality.</p>
             <div className="editor-frame" role="region" aria-label={`${active.title} rich text editor`}>
               <Editor
-                tinymceScriptSrc="/tinymce/tinymce.min.js"
+                apiKey={tinymceApiKey || 'no-api-key'}
+                tinymceScriptSrc={tinymceApiKey ? undefined : '/tinymce/tinymce.min.js'}
                 value={content[active.id]}
                 onEditorChange={(value) => setContent((current) => ({ ...current, [active.id]: value }))}
                 init={{

@@ -102,3 +102,38 @@ class ExportArtifact(BaseModel):
     media_type: str
     bytes_written: int
     compliance: ComplianceReport
+
+
+class GeneratedHtmlPayload(BaseModel):
+    html: str = Field(min_length=20)
+    filename: str = "cms-accessible-document"
+
+
+class AdHocExportArtifact(BaseModel):
+    format: Literal["html", "pdf"]
+    filename: str
+    media_type: str
+    bytes_written: int
+    download_url: str
+
+
+class SpecFinding(BaseModel):
+    severity: Literal["error", "warning", "info"]
+    label: str
+    detail: str
+    evidence: str | None = None
+
+
+class SpecComparisonReport(BaseModel):
+    passed: bool
+    score: int = Field(ge=0, le=100)
+    similarity: float = Field(ge=0, le=1)
+    coverage: float = Field(ge=0, le=1)
+    required_terms_found: list[str]
+    required_terms_missing: list[str]
+    missing_snippets: list[str]
+    order_findings: list[SpecFinding]
+    spec_word_count: int
+    document_word_count: int
+    review_note: str = "Automated spec matching supports reviewer QA but does not replace final CMS, Word, Acrobat, or human accessibility review."
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

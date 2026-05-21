@@ -3,11 +3,13 @@ import { Editor } from '@tinymce/tinymce-react'
 import {
   Accessibility,
   AlertTriangle,
+  BrainCircuit,
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
   Download,
   FileCheck2,
+  FileUp,
   FileText,
   Languages,
   Landmark,
@@ -44,6 +46,36 @@ type ComplianceIssue = {
   severity: 'error' | 'warning'
   label: string
   detail: string
+}
+
+type SpecFinding = {
+  severity: 'error' | 'warning' | 'info'
+  label: string
+  detail: string
+  evidence?: string | null
+}
+
+type SpecComparisonReport = {
+  passed: boolean
+  score: number
+  similarity: number
+  coverage: number
+  required_terms_found: string[]
+  required_terms_missing: string[]
+  missing_snippets: string[]
+  order_findings: SpecFinding[]
+  spec_word_count: number
+  document_word_count: number
+  review_note: string
+  created_at: string
+}
+
+type ServerExportArtifact = {
+  format: 'html' | 'pdf'
+  filename: string
+  media_type: string
+  bytes_written: number
+  download_url: string
 }
 
 const metadataSeed: MetadataField[] = [
@@ -114,7 +146,17 @@ const sectionSeed: Section[] = [
   },
 ]
 
-const workflowSteps = ['Draft', '508 preflight', 'Compliance review', 'Export package']
+const workflowSteps = ['Draft', '508 preflight', 'Spec match', 'Compliance review', 'Export package']
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'https://health-doc-cms-api.onrender.com').replace(/\/$/, '')
+
+function apiUrl(path: string) {
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+function downloadUrl(path: string) {
+  return path.startsWith('http') ? path : apiUrl(path)
+}
 
 function textOnly(html: string) {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -168,11 +210,19 @@ function App() {
   const [activeSection, setActiveSection] = useState(sectionSeed[0].id)
   const [content, setContent] = useState<Record<string, string>>(() => Object.fromEntries(sectionSeed.map((section) => [section.id, section.defaultContent])))
   const [mobileTocOpen, setMobileTocOpen] = useState(false)
+  const [specFile, setSpecFile] = useState<File | null>(null)
+  const [specReport, setSpecReport] = useState<SpecComparisonReport | null>(null)
+  const [specStatus, setSpecStatus] = useState('Upload a marked-up SB spec PDF and compare it against the generated HTML.')
+  const [isComparingSpec, setIsComparingSpec] = useState(false)
+  const [serverExport, setServerExport] = useState<ServerExportArtifact | null>(null)
+  const [serverExportStatus, setServerExportStatus] = useState('Server PDF export is ready when the backend is available.')
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
   const active = sections.find((section) => section.id === activeSection) ?? sections[0]
   const issues = useMemo(() => runCompliance(metadata, sections, content), [metadata, sections, content])
   const htmlExport = useMemo(() => buildHtml(metadata, sections, content), [metadata, sections, content])
   const errors = issues.filter((issue) => issue.severity === 'error').length
   const warnings = issues.filter((issue) => issue.severity === 'warning').length
+  const specMissingCount = specReport ? specReport.required_terms_missing.length + specReport.missing_snippets.length : 0
   const completedSections = sections.filter((section) => textOnly(content[section.id] ?? '').length >= 10).length
   const readiness = Math.round(((sections.length - Math.min(errors, sections.length)) / sections.length) * 100)
 
@@ -189,6 +239,58 @@ function App() {
     anchor.download = 'cms-accessible-document.html'
     anchor.click()
     URL.revokeObjectURL(url)
+  }
+
+  const exportServerPdf = async () => {
+    setIsExportingPdf(true)
+    setServerExportStatus('Generating server PDF package from canonical HTML...')
+    setServerExport(null)
+    try {
+      const response = await fetch(apiUrl('/api/v1/exports/pdf-package'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: htmlExport, filename: 'cms-accessible-document.pdf' }),
+      })
+      if (!response.ok) {
+        const detail = await response.text()
+        throw new Error(detail || `PDF export failed with HTTP ${response.status}`)
+      }
+      const artifact = (await response.json()) as ServerExportArtifact
+      setServerExport(artifact)
+      setServerExportStatus(`PDF package generated: ${artifact.filename}`)
+      window.open(downloadUrl(artifact.download_url), '_blank', 'noopener,noreferrer')
+    } catch (error) {
+      setServerExportStatus(error instanceof Error ? error.message : 'Unable to generate server PDF package.')
+    } finally {
+      setIsExportingPdf(false)
+    }
+  }
+
+  const compareAgainstSpec = async () => {
+    if (!specFile) {
+      setSpecStatus('Select the marked-up SB specification PDF before running comparison.')
+      return
+    }
+    setIsComparingSpec(true)
+    setSpecStatus('Extracting spec PDF text and comparing against generated HTML...')
+    setSpecReport(null)
+    try {
+      const formData = new FormData()
+      formData.append('spec_file', specFile)
+      formData.append('html', htmlExport)
+      const response = await fetch(apiUrl('/api/v1/specs/compare-html'), { method: 'POST', body: formData })
+      if (!response.ok) {
+        const detail = await response.text()
+        throw new Error(detail || `Spec comparison failed with HTTP ${response.status}`)
+      }
+      const report = (await response.json()) as SpecComparisonReport
+      setSpecReport(report)
+      setSpecStatus(report.passed ? 'Spec comparison passed the configured precision threshold.' : 'Spec comparison found gaps that need author or reviewer attention.')
+    } catch (error) {
+      setSpecStatus(error instanceof Error ? error.message : 'Unable to compare against the uploaded specification.')
+    } finally {
+      setIsComparingSpec(false)
+    }
   }
 
   return (
@@ -213,6 +315,7 @@ function App() {
         <article className="metric-card"><ClipboardCheck aria-hidden="true" /><span>Sections complete</span><strong>{completedSections}/{sections.length}</strong></article>
         <article className="metric-card"><AlertTriangle aria-hidden="true" /><span>Advisories</span><strong>{warnings}</strong></article>
         <article className="metric-card"><Languages aria-hidden="true" /><span>Language</span><strong>{metadata.find((field) => field.id === 'language')?.value || 'Missing'}</strong></article>
+        <article className={specReport && specMissingCount === 0 ? 'metric-card positive' : 'metric-card'}><BrainCircuit aria-hidden="true" /><span>Spec match</span><strong>{specReport ? `${specReport.score}%` : 'Not run'}</strong></article>
       </section>
 
       <nav className="workflow" aria-label="Compliance workflow progress">
@@ -317,8 +420,51 @@ function App() {
           </div>
           <div className="action-stack">
             <button className="primary-action" onClick={downloadHtml}><Download size={18} aria-hidden="true" /> Export accessible HTML</button>
-            <button className="secondary-action" type="button"><FileCheck2 size={18} aria-hidden="true" /> Request server PDF package</button>
+            <button className="secondary-action" type="button" onClick={exportServerPdf} disabled={isExportingPdf}><FileCheck2 size={18} aria-hidden="true" /> {isExportingPdf ? 'Generating PDF...' : 'Generate server PDF package'}</button>
+            {serverExport && <a className="download-link" href={downloadUrl(serverExport.download_url)} target="_blank" rel="noreferrer">Download latest {serverExport.format.toUpperCase()} package</a>}
+            <p className="status-text" aria-live="polite">{serverExportStatus}</p>
           </div>
+          <section className="spec-review" aria-labelledby="spec-review-heading">
+            <div className="panel-title-row compact-row">
+              <div>
+                <p className="eyebrow"><BrainCircuit size={16} aria-hidden="true" /> spec precision</p>
+                <h3 id="spec-review-heading">Compare generated HTML to marked-up SB spec</h3>
+              </div>
+              {specReport && <span className={specReport.passed ? 'spec-score passed' : 'spec-score warning'}>{specReport.score}%</span>}
+            </div>
+            <label className="file-picker" htmlFor="spec-file">
+              <FileUp size={18} aria-hidden="true" />
+              <span>{specFile ? specFile.name : 'Choose marked-up spec PDF'}</span>
+              <input id="spec-file" type="file" accept="application/pdf,.pdf" onChange={(event) => setSpecFile(event.target.files?.[0] ?? null)} />
+            </label>
+            <button className="secondary-action" type="button" onClick={compareAgainstSpec} disabled={isComparingSpec}><SearchCheck size={18} aria-hidden="true" /> {isComparingSpec ? 'Comparing...' : 'Run spec match'}</button>
+            <p className="status-text" aria-live="polite">{specStatus}</p>
+            {specReport && (
+              <div className="spec-results">
+                <div className="score-grid compact-score">
+                  <span><strong>{Math.round(specReport.coverage * 100)}%</strong> coverage</span>
+                  <span><strong>{Math.round(specReport.similarity * 100)}%</strong> similarity</span>
+                </div>
+                <p><strong>Spec words:</strong> {specReport.spec_word_count.toLocaleString()} · <strong>Document words:</strong> {specReport.document_word_count.toLocaleString()}</p>
+                {specReport.required_terms_missing.length > 0 && (
+                  <article className="issue warning"><AlertTriangle size={18} aria-hidden="true" /><div><strong>Missing SB required terms</strong><p>{specReport.required_terms_missing.slice(0, 8).join(', ')}</p></div></article>
+                )}
+                {specReport.order_findings.map((finding) => (
+                  <article key={`${finding.label}-${finding.evidence ?? 'none'}`} className={`issue ${finding.severity === 'error' ? 'error' : finding.severity === 'warning' ? 'warning' : 'passed'}`}>
+                    <CheckCircle2 size={18} aria-hidden="true" />
+                    <div><strong>{finding.label}</strong><p>{finding.detail}</p></div>
+                  </article>
+                ))}
+                {specReport.missing_snippets.length > 0 && (
+                  <details className="snippet-details">
+                    <summary>Review missing spec snippets ({specReport.missing_snippets.length})</summary>
+                    {specReport.missing_snippets.slice(0, 6).map((snippet) => <p key={snippet}>{snippet}</p>)}
+                  </details>
+                )}
+                <p className="review-note">{specReport.review_note}</p>
+              </div>
+            )}
+          </section>
           <div className="standard-note"><Sparkles size={18} aria-hidden="true" /><p><strong>WCAG-aligned UI:</strong> visible focus states, labeled inputs, keyboard targets, semantic landmarks, responsive panels, and high-contrast typography.</p></div>
         </aside>
       </main>

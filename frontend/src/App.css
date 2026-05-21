@@ -589,3 +589,111 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   .score-grid { grid-template-columns: 1fr; }
   .preview iframe { min-height: 360px; }
 }
+
+.spec-review {
+  display: grid;
+  gap: .85rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+}
+
+.spec-review h3 {
+  margin: .2rem 0 0;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.spec-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  min-height: 44px;
+  border-radius: 999px;
+  font-weight: 950;
+}
+
+.spec-score.passed {
+  border: 1px solid #86efac;
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.spec-score.warning {
+  border: 1px solid #fde68a;
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.file-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .55rem;
+  min-height: 48px;
+  padding: .65rem .85rem;
+  border: 1px dashed #93c5fd;
+  border-radius: .95rem;
+  background: #ffffff;
+  color: var(--primary-strong);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.file-picker input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.status-text,
+.review-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: .9rem;
+}
+
+.spec-results {
+  display: grid;
+  gap: .75rem;
+}
+
+.compact-score {
+  margin: 0;
+}
+
+.snippet-details {
+  padding: .85rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+}
+
+.snippet-details summary {
+  cursor: pointer;
+  color: var(--primary-strong);
+  font-weight: 900;
+}
+
+.snippet-details p {
+  margin: .65rem 0 0;
+  color: var(--text-muted);
+  font-size: .88rem;
+}
+
+.download-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: .9rem;
+  color: var(--primary-strong);
+  font-weight: 900;
+}

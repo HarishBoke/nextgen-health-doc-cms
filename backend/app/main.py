@@ -1,28 +1,40 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from weasyprint import HTML
 
 from app.core.schemas import (
+    AdHocExportArtifact,
     DocumentCreate,
     DocumentInstance,
     DocumentType,
     ExportArtifact,
+    GeneratedHtmlPayload,
     SectionContent,
     SectionRule,
     SectionUpdate,
     Template,
+    SpecComparisonReport,
     TemplateSection,
 )
 from app.services.compliance import run_document_preflight
+from app.services.spec_compare import compare_spec_to_html, extract_spec_text_from_pdf
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 EXPORT_DIR = ROOT_DIR / "storage" / "exports"
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _safe_export_name(filename: str, extension: str) -> str:
+    stem = Path(filename).stem or "cms-accessible-document"
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-_") or "cms-accessible-document"
+    return f"{stem}-{uuid4().hex[:10]}.{extension}"
 
 app = FastAPI(
     title="Healthcare Document CMS API",
@@ -230,6 +242,35 @@ def export_pdf(document_id: str) -> ExportArtifact:
     target = EXPORT_DIR / f"{document.id}.pdf"
     HTML(string=html, base_url=str(ROOT_DIR)).write_pdf(target)
     return ExportArtifact(document_id=document.id, format="pdf", filename=target.name, media_type="application/pdf", bytes_written=target.stat().st_size, compliance=report)
+
+
+@app.post("/api/v1/specs/compare-html", response_model=SpecComparisonReport)
+async def compare_html_to_spec(spec_file: UploadFile = File(...), html: str = Form(...)) -> SpecComparisonReport:
+    if not spec_file.filename or not spec_file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Upload a PDF specification file for comparison.")
+    if len(html.strip()) < 20:
+        raise HTTPException(status_code=400, detail="Generated HTML is required for comparison.")
+    try:
+        spec_text = extract_spec_text_from_pdf(await spec_file.read())
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Unable to extract text from uploaded PDF specification: {exc}") from exc
+    if len(spec_text.split()) < 25:
+        raise HTTPException(status_code=422, detail="The uploaded PDF did not contain enough extractable text for automated comparison.")
+    return compare_spec_to_html(spec_text, html)
+
+
+@app.post("/api/v1/exports/html-package", response_model=AdHocExportArtifact)
+def export_html_package(payload: GeneratedHtmlPayload) -> AdHocExportArtifact:
+    target = EXPORT_DIR / _safe_export_name(payload.filename, "html")
+    target.write_text(payload.html, encoding="utf-8")
+    return AdHocExportArtifact(format="html", filename=target.name, media_type="text/html", bytes_written=target.stat().st_size, download_url=f"/api/v1/exports/{target.name}")
+
+
+@app.post("/api/v1/exports/pdf-package", response_model=AdHocExportArtifact)
+def export_pdf_package(payload: GeneratedHtmlPayload) -> AdHocExportArtifact:
+    target = EXPORT_DIR / _safe_export_name(payload.filename, "pdf")
+    HTML(string=payload.html, base_url=str(ROOT_DIR)).write_pdf(target)
+    return AdHocExportArtifact(format="pdf", filename=target.name, media_type="application/pdf", bytes_written=target.stat().st_size, download_url=f"/api/v1/exports/{target.name}")
 
 
 @app.get("/api/v1/exports/{filename}")

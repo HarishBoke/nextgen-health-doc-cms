@@ -316,13 +316,16 @@ def compare_spec_to_html(spec_text: str, html: str) -> SpecComparisonReport:
     similarity = SequenceMatcher(None, normalized_spec.lower()[:60000], normalized_document.lower()[:60000]).ratio() if normalized_spec and normalized_document else 0.0
     coverage = _coverage_score(normalized_spec, normalized_document)
     required_ratio = len(required_found) / max(1, len(required_found) + len(required_missing))
-    score = round((similarity * 30) + (coverage * 35) + (required_ratio * 35))
+    raw_score = round((similarity * 30) + (coverage * 35) + (required_ratio * 35))
     missing_snippets = _missing_snippets(normalized_spec, normalized_document)
     order_findings = _order_findings(normalized_document)
     blocker_count = len(required_missing) + len(missing_snippets)
+    order_warning_count = sum(1 for finding in order_findings if finding.severity in {"warning", "critical", "major"})
+    precision_gate_passed = blocker_count == 0 and order_warning_count == 0 and required_ratio >= 1.0 and coverage >= 0.97
+    score = 100 if precision_gate_passed else raw_score
 
     return SpecComparisonReport(
-        passed=score >= 92 and blocker_count == 0,
+        passed=score >= 92 and blocker_count == 0 and order_warning_count == 0,
         score=max(0, min(100, score)),
         similarity=round(similarity, 4),
         coverage=round(coverage, 4),

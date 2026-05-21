@@ -1,6 +1,24 @@
 import { useMemo, useState } from 'react'
 import { Editor } from '@tinymce/tinymce-react'
-import { Accessibility, AlertTriangle, CheckCircle2, Download, FileCheck2, FileText, Landmark, ShieldCheck } from 'lucide-react'
+import {
+  Accessibility,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardCheck,
+  Download,
+  FileCheck2,
+  FileText,
+  Languages,
+  Landmark,
+  LayoutDashboard,
+  LockKeyhole,
+  Menu,
+  PanelLeftClose,
+  SearchCheck,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react'
 import './App.css'
 
 type Section = {
@@ -18,6 +36,7 @@ type MetadataField = {
   label: string
   value: string
   required: boolean
+  help: string
 }
 
 type ComplianceIssue = {
@@ -28,11 +47,11 @@ type ComplianceIssue = {
 }
 
 const metadataSeed: MetadataField[] = [
-  { id: 'documentType', label: 'Document type', value: 'Annual Notice of Change', required: true },
-  { id: 'planYear', label: 'Plan year', value: '2026', required: true },
-  { id: 'planName', label: 'Plan name', value: 'Example Medicare Advantage Plan', required: true },
-  { id: 'contractNumber', label: 'Contract number', value: 'H0000', required: true },
-  { id: 'language', label: 'Document language', value: 'en-US', required: true },
+  { id: 'documentType', label: 'Document type', value: 'Annual Notice of Change', required: true, help: 'CMS model material category' },
+  { id: 'planYear', label: 'Plan year', value: '2026', required: true, help: 'Required for model-year traceability' },
+  { id: 'planName', label: 'Plan name', value: 'Example Medicare Advantage Plan', required: true, help: 'Member-facing plan identity' },
+  { id: 'contractNumber', label: 'Contract number', value: 'H0000', required: true, help: 'CMS contract identifier' },
+  { id: 'language', label: 'Document language', value: 'en-US', required: true, help: 'Language metadata for export' },
 ]
 
 const sectionSeed: Section[] = [
@@ -95,6 +114,8 @@ const sectionSeed: Section[] = [
   },
 ]
 
+const workflowSteps = ['Draft', '508 preflight', 'Compliance review', 'Export package']
+
 function textOnly(html: string) {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
 }
@@ -109,7 +130,7 @@ function buildHtml(metadata: MetadataField[], sections: Section[], content: Reco
     return `<section id="${section.id}" aria-labelledby="heading-${section.id}"><${Heading} id="heading-${section.id}">${section.number} ${section.title}</${Heading}>${content[section.id]}</section>`
   }).join('')
 
-  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Arial,Helvetica,sans-serif;line-height:1.5;max-width:7.625in;margin:0.75in auto;color:#111827}a{color:#174ea6}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #374151;padding:.45rem;text-align:left;vertical-align:top}th{background:#eef2ff}h1,h2,h3,h4{page-break-after:avoid}.metadata{display:grid;grid-template-columns:12rem 1fr;gap:.25rem 1rem}.toc-level-2{margin-left:1rem}@page{size:8.5in 11in;margin:.75in}</style></head><body><main><h1>${title}</h1><dl class="metadata">${metadataRows}</dl><nav aria-label="Document table of contents"><h2>Table of Contents</h2><ol>${toc}</ol></nav>${body}</main></body></html>`
+  return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>body{font-family:Arial,Helvetica,sans-serif;line-height:1.5;max-width:7.625in;margin:0.75in auto;color:#111827}a{color:#174ea6}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #374151;padding:.45rem;text-align:left;vertical-align:top}th{background:#eef2ff}h1,h2,h3,h4{page-break-after:avoid}.metadata{display:grid;grid-template-columns:12rem 1fr;gap:.25rem 1rem}.toc-level-2{margin-left:1rem}@page{size:8.5in 11in;margin:.75in}</style></head><body><main><h1>${title}</h1><dl class="metadata">${metadataRows}</dl><nav aria-label="Document table of contents"><h2>Table of Contents</h2><ol>${toc}</ol></nav>${body}</main></body></html>`
 }
 
 function runCompliance(metadata: MetadataField[], sections: Section[], content: Record<string, string>): ComplianceIssue[] {
@@ -146,13 +167,20 @@ function App() {
   const [sections] = useState(sectionSeed)
   const [activeSection, setActiveSection] = useState(sectionSeed[0].id)
   const [content, setContent] = useState<Record<string, string>>(() => Object.fromEntries(sectionSeed.map((section) => [section.id, section.defaultContent])))
+  const [mobileTocOpen, setMobileTocOpen] = useState(false)
   const active = sections.find((section) => section.id === activeSection) ?? sections[0]
   const issues = useMemo(() => runCompliance(metadata, sections, content), [metadata, sections, content])
   const htmlExport = useMemo(() => buildHtml(metadata, sections, content), [metadata, sections, content])
   const errors = issues.filter((issue) => issue.severity === 'error').length
   const warnings = issues.filter((issue) => issue.severity === 'warning').length
+  const completedSections = sections.filter((section) => textOnly(content[section.id] ?? '').length >= 10).length
+  const readiness = Math.round(((sections.length - Math.min(errors, sections.length)) / sections.length) * 100)
 
   const updateMetadata = (id: string, value: string) => setMetadata((items) => items.map((item) => (item.id === id ? { ...item, value } : item)))
+  const switchSection = (id: string) => {
+    setActiveSection(id)
+    setMobileTocOpen(false)
+  }
   const downloadHtml = () => {
     const blob = new Blob([htmlExport], { type: 'text/html;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -166,59 +194,144 @@ function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to document editor</a>
-      <header className="hero" role="banner">
+
+      <header className="masthead" role="banner">
+        <div className="brand-mark" aria-hidden="true"><Landmark size={24} /></div>
         <div>
-          <p className="eyebrow"><Landmark size={16} aria-hidden="true" /> CMS.gov healthcare document CMS</p>
-          <h1>Next-generation ANOC, SB, and EOC authoring cockpit</h1>
-          <p>Govern CMS model materials with section-level TinyMCE editing, source-aware compliance guardrails, accessible HTML, Word-ready output, and PDF export readiness.</p>
+          <p className="eyebrow">CMS.gov healthcare document CMS</p>
+          <h1>Professional ANOC, SB, and EOC compliance workspace</h1>
+          <p className="lede">Author regulated Medicare materials in a responsive, WCAG-aligned cockpit with structured CMS sections, 501/508 preflight, semantic HTML export, and PDF package readiness.</p>
         </div>
-        <div className="status-card" aria-label="Compliance status summary">
-          <ShieldCheck size={28} aria-hidden="true" />
-          <strong>{errors === 0 ? 'Export preflight ready' : `${errors} blocking issue${errors === 1 ? '' : 's'}`}</strong>
-          <span>{warnings} advisory warning{warnings === 1 ? '' : 's'} found</span>
+        <div className="masthead-actions" aria-label="Primary status and actions">
+          <div className="readiness-ring" aria-label={`Export readiness ${readiness} percent`}><strong>{readiness}%</strong><span>ready</span></div>
+          <button className="primary-action compact" onClick={downloadHtml}><Download size={18} aria-hidden="true" /> Export HTML</button>
         </div>
       </header>
+
+      <section className="status-strip" aria-label="Document readiness summary">
+        <article className="metric-card positive"><ShieldCheck aria-hidden="true" /><span>Preflight</span><strong>{errors === 0 ? 'Ready' : `${errors} blocker${errors === 1 ? '' : 's'}`}</strong></article>
+        <article className="metric-card"><ClipboardCheck aria-hidden="true" /><span>Sections complete</span><strong>{completedSections}/{sections.length}</strong></article>
+        <article className="metric-card"><AlertTriangle aria-hidden="true" /><span>Advisories</span><strong>{warnings}</strong></article>
+        <article className="metric-card"><Languages aria-hidden="true" /><span>Language</span><strong>{metadata.find((field) => field.id === 'language')?.value || 'Missing'}</strong></article>
+      </section>
+
+      <nav className="workflow" aria-label="Compliance workflow progress">
+        {workflowSteps.map((step, index) => <span key={step} className={index <= 1 ? 'current' : ''}>{step}</span>)}
+      </nav>
+
       <main id="main-content" className="workspace">
-        <aside className="sidebar" aria-label="Document table of contents">
-          <h2>Document structure</h2>
-          <p>CMS sections remain in approved order. Locked sections should only receive approved variable updates.</p>
-          <nav>
+        <aside className={`sidebar ${mobileTocOpen ? 'open' : ''}`} aria-label="Document table of contents">
+          <div className="panel-title-row">
+            <div>
+              <h2><LayoutDashboard size={20} aria-hidden="true" /> Document structure</h2>
+              <p>CMS sections remain in approved order. Locked sections should only receive approved variable updates.</p>
+            </div>
+            <button className="icon-button mobile-only" type="button" onClick={() => setMobileTocOpen(false)} aria-label="Close document structure"><PanelLeftClose size={20} /></button>
+          </div>
+          <nav className="toc-list" aria-label="CMS section list">
             {sections.map((section) => (
-              <button key={section.id} className={section.id === activeSection ? 'toc-item active' : 'toc-item'} style={{ marginLeft: `${(section.level - 1) * 1.25}rem` }} onClick={() => setActiveSection(section.id)} aria-current={section.id === activeSection ? 'step' : undefined}>
-                <span>{section.number}</span><strong>{section.title}</strong>{section.locked && <em>locked text</em>}
+              <button key={section.id} className={section.id === activeSection ? 'toc-item active' : 'toc-item'} style={{ marginLeft: `${(section.level - 1) * 1.1}rem` }} onClick={() => switchSection(section.id)} aria-current={section.id === activeSection ? 'step' : undefined}>
+                <span className="toc-kicker">{section.number}</span>
+                <strong>{section.title}</strong>
+                {section.locked && <em><LockKeyhole size={13} aria-hidden="true" /> locked CMS text</em>}
               </button>
             ))}
           </nav>
         </aside>
+
         <section className="editor-column" aria-labelledby="editor-heading">
+          <div className="mobile-commandbar">
+            <button className="secondary-action compact" type="button" onClick={() => setMobileTocOpen(true)}><Menu size={18} aria-hidden="true" /> Sections</button>
+            <span aria-live="polite">Editing: {active.number}</span>
+          </div>
+
           <section className="metadata-panel" aria-labelledby="metadata-heading">
-            <h2 id="metadata-heading"><FileText size={20} aria-hidden="true" /> Document metadata</h2>
+            <div className="section-heading-row compact-row">
+              <div>
+                <p className="eyebrow"><FileText size={16} aria-hidden="true" /> document control</p>
+                <h2 id="metadata-heading">Metadata required for CMS traceability</h2>
+              </div>
+              <span className="assurance-badge"><SearchCheck size={16} aria-hidden="true" /> WCAG-ready labels</span>
+            </div>
             <div className="metadata-grid">
               {metadata.map((field) => (
-                <label key={field.id}><span>{field.label}{field.required ? ' *' : ''}</span><input value={field.value} onChange={(event) => updateMetadata(field.id, event.target.value)} /></label>
+                <label key={field.id} htmlFor={field.id}>
+                  <span>{field.label}{field.required ? ' *' : ''}</span>
+                  <input id={field.id} value={field.value} onChange={(event) => updateMetadata(field.id, event.target.value)} aria-describedby={`${field.id}-help`} aria-required={field.required} />
+                  <small id={`${field.id}-help`}>{field.help}</small>
+                </label>
               ))}
             </div>
           </section>
+
           <section className="authoring-card" aria-labelledby="editor-heading">
-            <div className="section-heading-row"><div><p className="eyebrow">{active.number}</p><h2 id="editor-heading">{active.title}</h2></div>{active.locked && <span className="lock-badge">CMS standardized text</span>}</div>
-            <p className="instruction">Use semantic headings, accessible tables, descriptive links, and approved CMS insertions. This editor intentionally restricts formatting that can break downstream 508/PDF quality.</p>
-            <Editor tinymceScriptSrc="/tinymce/tinymce.min.js" value={content[active.id]} onEditorChange={(value) => setContent((current) => ({ ...current, [active.id]: value }))} init={{ height: 420, menubar: false, branding: false, plugins: 'advlist lists link image table code wordcount searchreplace visualblocks', toolbar: 'undo redo | blocks | bold italic underline | bullist numlist | link image table | removeformat | visualblocks code', block_formats: 'Paragraph=p; Section heading=h2; Subsection heading=h3; Minor heading=h4', table_advtab: false, table_cell_advtab: false, table_row_advtab: false, content_style: 'body{font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.55;color:#111827} table{border-collapse:collapse;width:100%} th,td{border:1px solid #4b5563;padding:8px} th{background:#eef2ff}' }} />
+            <div className="section-heading-row">
+              <div>
+                <p className="eyebrow">{active.number}</p>
+                <h2 id="editor-heading">{active.title}</h2>
+              </div>
+              {active.locked && <span className="lock-badge"><LockKeyhole size={15} aria-hidden="true" /> CMS standardized text</span>}
+            </div>
+            <p className="instruction">Use semantic headings, accessible tables, descriptive links, and approved CMS insertions. The editor restricts formatting patterns that commonly break downstream 508/PDF quality.</p>
+            <div className="editor-frame" role="region" aria-label={`${active.title} rich text editor`}>
+              <Editor
+                tinymceScriptSrc="/tinymce/tinymce.min.js"
+                value={content[active.id]}
+                onEditorChange={(value) => setContent((current) => ({ ...current, [active.id]: value }))}
+                init={{
+                  height: 460,
+                  menubar: false,
+                  branding: false,
+                  plugins: 'advlist lists link image table code wordcount searchreplace visualblocks autoresize',
+                  toolbar: 'undo redo | blocks | bold italic underline | bullist numlist | link image table | removeformat | visualblocks code',
+                  block_formats: 'Paragraph=p; Section heading=h2; Subsection heading=h3; Minor heading=h4',
+                  table_advtab: false,
+                  table_cell_advtab: false,
+                  table_row_advtab: false,
+                  content_style: 'body{font-family:Arial,Helvetica,sans-serif;font-size:17px;line-height:1.6;color:#111827;margin:1rem} a{color:#174ea6;text-decoration:underline} table{border-collapse:collapse;width:100%;margin:1rem 0} th,td{border:1px solid #4b5563;padding:10px;text-align:left;vertical-align:top} th{background:#eef2ff;color:#111827} h2,h3,h4{line-height:1.25;color:#0f172a}',
+                }}
+              />
+            </div>
           </section>
         </section>
+
         <aside className="compliance-panel" aria-label="Compliance preflight">
-          <h2><Accessibility size={20} aria-hidden="true" /> 501/508 preflight</h2>
-          <p>Automated checks support production quality but do not replace final Word and Acrobat accessibility verification.</p>
-          <div className="score-grid"><span><strong>{errors}</strong> errors</span><span><strong>{warnings}</strong> warnings</span></div>
-          <div className="issue-list" aria-live="polite">
-            {issues.length === 0 ? <div className="issue passed"><CheckCircle2 size={18} aria-hidden="true" /> All configured checks passed.</div> : issues.map((issue) => (
-              <article key={issue.id} className={`issue ${issue.severity}`}><AlertTriangle size={18} aria-hidden="true" /><div><strong>{issue.label}</strong><p>{issue.detail}</p></div></article>
+          <div className="panel-title-row">
+            <div>
+              <h2><Accessibility size={20} aria-hidden="true" /> 501/508 preflight</h2>
+              <p>Automated checks support production quality but do not replace final Word and Acrobat accessibility verification.</p>
+            </div>
+          </div>
+          <div className="score-grid" aria-label="Compliance issue counts">
+            <span><strong>{errors}</strong> errors</span>
+            <span><strong>{warnings}</strong> warnings</span>
+          </div>
+          <div className="issue-list" aria-live="polite" aria-relevant="additions removals">
+            {issues.length === 0 ? <div className="issue passed"><CheckCircle2 size={18} aria-hidden="true" /> <span>All configured checks passed.</span></div> : issues.map((issue) => (
+              <article key={issue.id} className={`issue ${issue.severity}`}>
+                <AlertTriangle size={18} aria-hidden="true" />
+                <div><strong>{issue.label}</strong><p>{issue.detail}</p></div>
+              </article>
             ))}
           </div>
-          <button className="primary-action" onClick={downloadHtml}><Download size={18} aria-hidden="true" /> Export accessible HTML</button>
-          <button className="secondary-action"><FileCheck2 size={18} aria-hidden="true" /> Request server PDF package</button>
+          <div className="action-stack">
+            <button className="primary-action" onClick={downloadHtml}><Download size={18} aria-hidden="true" /> Export accessible HTML</button>
+            <button className="secondary-action" type="button"><FileCheck2 size={18} aria-hidden="true" /> Request server PDF package</button>
+          </div>
+          <div className="standard-note"><Sparkles size={18} aria-hidden="true" /><p><strong>WCAG-aligned UI:</strong> visible focus states, labeled inputs, keyboard targets, semantic landmarks, responsive panels, and high-contrast typography.</p></div>
         </aside>
       </main>
-      <section className="preview" aria-labelledby="preview-heading"><h2 id="preview-heading">Semantic export preview</h2><iframe title="Accessible document HTML preview" srcDoc={htmlExport} /></section>
+
+      <section className="preview" aria-labelledby="preview-heading">
+        <div className="section-heading-row compact-row">
+          <div>
+            <p className="eyebrow"><ChevronRight size={16} aria-hidden="true" /> semantic output</p>
+            <h2 id="preview-heading">Accessible export preview</h2>
+          </div>
+          <span className="assurance-badge">HTML source preview</span>
+        </div>
+        <iframe title="Accessible document HTML preview" srcDoc={htmlExport} />
+      </section>
     </div>
   )
 }

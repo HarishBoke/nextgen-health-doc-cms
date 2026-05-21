@@ -156,3 +156,178 @@ class AiSpecReviewReport(BaseModel):
     findings: list[AiSpecReviewFinding] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class AuthSignup(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=8)
+
+
+class AuthLogin(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=1)
+
+
+class AuthUser(BaseModel):
+    id: str
+    email: str
+    created_at: datetime
+
+
+class AuthSession(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: AuthUser
+
+
+class ClientProfile(BaseModel):
+    code: str
+    name: str
+    description: str = ""
+
+
+class DocumentTypeProfile(BaseModel):
+    code: DocumentType
+    name: str
+    description: str
+    spec_profile: str
+
+
+class RepeaterBlock(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    label: str
+    sort_order: int = 0
+    html: str = "<p>New repeated content.</p>"
+    data: dict[str, str] = Field(default_factory=dict)
+
+
+class AuthoringSection(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    section_key: str
+    title: str
+    sort_order: int = 0
+    html: str
+    locked: bool = False
+    style_profile: dict[str, str] = Field(default_factory=dict)
+    repeaters: list[RepeaterBlock] = Field(default_factory=list)
+
+
+class AuthoringPage(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    number: int
+    title: str
+    sort_order: int = 0
+    page_style: dict[str, str] = Field(default_factory=dict)
+    sections: list[AuthoringSection] = Field(default_factory=list)
+
+
+class ManagedDocumentCreate(BaseModel):
+    title: str
+    client_code: str = "UHG"
+    document_type: DocumentType = DocumentType.summary_of_benefits
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class ManagedDocumentSummary(BaseModel):
+    id: str
+    title: str
+    client_code: str
+    document_type: DocumentType
+    status: Literal["draft", "in_review", "approved", "exported"] = "draft"
+    page_count: int = 0
+    section_count: int = 0
+    latest_qa_score: int | None = None
+    updated_at: datetime
+
+
+class ManagedDocument(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    owner_id: str
+    title: str
+    client_code: str = "UHG"
+    document_type: DocumentType = DocumentType.summary_of_benefits
+    status: Literal["draft", "in_review", "approved", "exported"] = "draft"
+    metadata: dict[str, str] = Field(default_factory=dict)
+    stylesheet: str = ""
+    pages: list[AuthoringPage] = Field(default_factory=list)
+    latest_qa_score: int | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ManagedDocumentUpdate(BaseModel):
+    title: str | None = None
+    status: Literal["draft", "in_review", "approved", "exported"] | None = None
+    metadata: dict[str, str] | None = None
+    stylesheet: str | None = None
+    pages: list[AuthoringPage] | None = None
+
+
+class SectionHtmlUpdate(BaseModel):
+    html: str
+
+
+class StylesheetPayload(BaseModel):
+    html: str = Field(min_length=1)
+    css: str = ""
+
+
+class CssInlineWarning(BaseModel):
+    selector: str
+    message: str
+
+
+class CssInlineResult(BaseModel):
+    html: str
+    inlined_html: str
+    applied_rules: int
+    skipped_selectors: list[str] = Field(default_factory=list)
+    warnings: list[CssInlineWarning] = Field(default_factory=list)
+
+
+class StyleRequirement(BaseModel):
+    selector: str
+    property: str
+    expected: str
+    severity: Literal["error", "warning", "info"] = "error"
+    description: str = ""
+
+
+class StyleFinding(BaseModel):
+    severity: Literal["error", "warning", "info"]
+    selector: str
+    property: str
+    expected: str
+    actual: str | None = None
+    recommendation: str
+
+
+class StyleQaReport(BaseModel):
+    passed: bool
+    score: int = Field(ge=0, le=100)
+    checked_rules: int
+    findings: list[StyleFinding] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class StyleQaPayload(BaseModel):
+    html: str = Field(min_length=1)
+    css: str = ""
+    document_type: DocumentType = DocumentType.summary_of_benefits
+    client_code: str = "UHG"
+
+
+class AiFixSuggestion(BaseModel):
+    target: str
+    issue: str
+    suggested_fix: str
+    patch_hint: str | None = None
+
+
+class AiFixSuggestionReport(BaseModel):
+    available: bool
+    verdict: Literal["pass", "needs_minor_fixes", "needs_major_fixes", "unavailable"] = "unavailable"
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    summary: str
+    suggestions: list[AiFixSuggestion] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

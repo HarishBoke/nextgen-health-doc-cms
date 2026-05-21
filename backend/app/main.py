@@ -11,6 +11,7 @@ from weasyprint import HTML
 
 from app.core.schemas import (
     AdHocExportArtifact,
+    AiSpecReviewReport,
     DocumentCreate,
     DocumentInstance,
     DocumentType,
@@ -24,7 +25,7 @@ from app.core.schemas import (
     TemplateSection,
 )
 from app.services.compliance import run_document_preflight
-from app.services.spec_compare import compare_spec_to_html, extract_spec_text_from_pdf
+from app.services.spec_compare import ai_review_spec_to_html, compare_spec_to_html, extract_spec_text_from_pdf
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 EXPORT_DIR = ROOT_DIR / "storage" / "exports"
@@ -244,8 +245,7 @@ def export_pdf(document_id: str) -> ExportArtifact:
     return ExportArtifact(document_id=document.id, format="pdf", filename=target.name, media_type="application/pdf", bytes_written=target.stat().st_size, compliance=report)
 
 
-@app.post("/api/v1/specs/compare-html", response_model=SpecComparisonReport)
-async def compare_html_to_spec(spec_file: UploadFile = File(...), html: str = Form(...)) -> SpecComparisonReport:
+async def _extract_uploaded_spec_text(spec_file: UploadFile, html: str) -> str:
     if not spec_file.filename or not spec_file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Upload a PDF specification file for comparison.")
     if len(html.strip()) < 20:
@@ -256,7 +256,20 @@ async def compare_html_to_spec(spec_file: UploadFile = File(...), html: str = Fo
         raise HTTPException(status_code=422, detail=f"Unable to extract text from uploaded PDF specification: {exc}") from exc
     if len(spec_text.split()) < 25:
         raise HTTPException(status_code=422, detail="The uploaded PDF did not contain enough extractable text for automated comparison.")
+    return spec_text
+
+
+@app.post("/api/v1/specs/compare-html", response_model=SpecComparisonReport)
+async def compare_html_to_spec(spec_file: UploadFile = File(...), html: str = Form(...)) -> SpecComparisonReport:
+    spec_text = await _extract_uploaded_spec_text(spec_file, html)
     return compare_spec_to_html(spec_text, html)
+
+
+@app.post("/api/v1/specs/ai-review-html", response_model=AiSpecReviewReport)
+async def ai_review_html_to_spec(spec_file: UploadFile = File(...), html: str = Form(...)) -> AiSpecReviewReport:
+    spec_text = await _extract_uploaded_spec_text(spec_file, html)
+    comparison = compare_spec_to_html(spec_text, html)
+    return ai_review_spec_to_html(spec_text, html, comparison)
 
 
 @app.post("/api/v1/exports/html-package", response_model=AdHocExportArtifact)

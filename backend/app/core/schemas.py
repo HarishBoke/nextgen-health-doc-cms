@@ -137,3 +137,22 @@ class SpecComparisonReport(BaseModel):
     document_word_count: int
     review_note: str = "Automated spec matching supports reviewer QA but does not replace final CMS, Word, Acrobat, or human accessibility review."
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class AiSpecReviewFinding(BaseModel):
+    severity: Literal["critical", "major", "minor", "info"]
+    category: Literal["content", "structure", "accessibility", "pdf_readiness", "metadata"]
+    issue: str
+    recommendation: str
+    evidence: str | None = None
+
+
+class AiSpecReviewReport(BaseModel):
+    available: bool
+    model: str | None = None
+    verdict: Literal["pass", "needs_review", "blocked", "unavailable"] = "unavailable"
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    summary: str
+    findings: list[AiSpecReviewFinding] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

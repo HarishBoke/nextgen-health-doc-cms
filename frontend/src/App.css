@@ -697,3 +697,28 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   color: var(--primary-strong);
   font-weight: 900;
 }
+
+.ai-action {
+  border-color: rgba(109, 40, 217, 0.32);
+  color: #4c1d95;
+  background: linear-gradient(135deg, #faf5ff 0%, #eef2ff 100%);
+}
+
+.ai-action:hover {
+  background: linear-gradient(135deg, #f3e8ff 0%, #dbeafe 100%);
+}
+
+.ai-results {
+  border-left: 4px solid #7c3aed;
+  background: #fbfaff;
+}
+
+.ai-results .issue.passed {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.ai-results .issue.warning {
+  background: #fff7ed;
+  border-color: #fdba74;
+}

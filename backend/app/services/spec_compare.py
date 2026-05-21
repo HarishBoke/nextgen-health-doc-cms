@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from difflib import SequenceMatcher
 from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from app.core.schemas import SpecComparisonReport, SpecFinding
+from app.core.schemas import AiSpecReviewFinding, AiSpecReviewReport, SpecComparisonReport, SpecFinding
 
 SB_REQUIRED_TERMS = [
     "Summary of Benefits",
@@ -197,6 +201,108 @@ def _order_findings(document_text: str) -> list[SpecFinding]:
             )
         )
     return findings
+
+
+def _build_ai_fallback_report(reason: str, comparison: SpecComparisonReport | None = None) -> AiSpecReviewReport:
+    findings: list[AiSpecReviewFinding] = []
+    next_steps = [
+        "Run deterministic spec match and resolve required-term and missing-snippet findings first.",
+        "Configure OPENAI_API_KEY on the backend host to enable semantic AI review.",
+        "Complete final CMS, Word, Acrobat, and human accessibility review before release.",
+    ]
+    if comparison and comparison.required_terms_missing:
+        findings.append(
+            AiSpecReviewFinding(
+                severity="major",
+                category="content",
+                issue="Deterministic comparison found missing required SB terms.",
+                recommendation="Author or import the missing benefit rows and required date/member-facing terms before relying on AI review.",
+                evidence=", ".join(comparison.required_terms_missing[:8]),
+            )
+        )
+    return AiSpecReviewReport(
+        available=False,
+        verdict="unavailable",
+        confidence=0.0,
+        summary=reason,
+        findings=findings,
+        next_steps=next_steps,
+    )
+
+
+def _coerce_ai_review_payload(raw_content: str) -> AiSpecReviewReport:
+    try:
+        payload = json.loads(raw_content)
+    except json.JSONDecodeError:
+        return AiSpecReviewReport(
+            available=True,
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            verdict="needs_review",
+            confidence=0.4,
+            summary=raw_content[:1200],
+            findings=[],
+            next_steps=["Review the free-form AI response manually because it was not returned as structured JSON."],
+        )
+
+    findings = [AiSpecReviewFinding(**item) for item in payload.get("findings", [])[:12] if isinstance(item, dict)]
+    return AiSpecReviewReport(
+        available=True,
+        model=payload.get("model") or os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        verdict=payload.get("verdict", "needs_review"),
+        confidence=max(0.0, min(1.0, float(payload.get("confidence", 0.5)))),
+        summary=str(payload.get("summary", "AI review completed; inspect findings before release."))[:1600],
+        findings=findings,
+        next_steps=[str(step)[:260] for step in payload.get("next_steps", [])[:8]],
+    )
+
+
+def ai_review_spec_to_html(spec_text: str, html: str, comparison: SpecComparisonReport | None = None) -> AiSpecReviewReport:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return _build_ai_fallback_report("AI semantic review is not configured on this backend. Deterministic spec matching remains available.", comparison)
+
+    document_text = html_to_text(html)
+    model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    comparison_summary = comparison.model_dump(mode="json") if comparison else {}
+    prompt = f"""
+You are a Medicare document QA reviewer. Compare the generated document text against the supplied marked-up Summary of Benefits specification text. Focus on content completeness, SB structure/order, member-facing precision, HTML/accessibility/PDF-readiness risks, and whether the document can be released. Do not invent compliance guarantees. Return strict JSON only with this shape: {{"model":"{model}","verdict":"pass|needs_review|blocked","confidence":0.0,"summary":"...","findings":[{{"severity":"critical|major|minor|info","category":"content|structure|accessibility|pdf_readiness|metadata","issue":"...","recommendation":"...","evidence":"..."}}],"next_steps":["..."]}}.
+
+Deterministic comparison summary:
+{json.dumps(comparison_summary)[:6000]}
+
+Specification text excerpt:
+{normalize_text(spec_text)[:18000]}
+
+Generated document text:
+{normalize_text(document_text)[:18000]}
+""".strip()
+    request_body = json.dumps(
+        {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a careful healthcare document QA reviewer. Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.1,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}/chat/completions",
+        data=request_body,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError) as exc:
+        return _build_ai_fallback_report(f"AI semantic review could not be completed: {exc}", comparison)
+
+    content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
+    report = _coerce_ai_review_payload(content)
+    report.model = model
+    return report
 
 
 def compare_spec_to_html(spec_text: str, html: str) -> SpecComparisonReport:

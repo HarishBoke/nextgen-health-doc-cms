@@ -78,6 +78,25 @@ type ServerExportArtifact = {
   download_url: string
 }
 
+type AiReviewFinding = {
+  severity: 'critical' | 'major' | 'minor' | 'info'
+  category: 'content' | 'structure' | 'accessibility' | 'pdf_readiness' | 'metadata'
+  issue: string
+  recommendation: string
+  evidence?: string | null
+}
+
+type AiSpecReviewReport = {
+  available: boolean
+  model?: string | null
+  verdict: 'pass' | 'needs_review' | 'blocked' | 'unavailable'
+  confidence: number
+  summary: string
+  findings: AiReviewFinding[]
+  next_steps: string[]
+  created_at: string
+}
+
 const metadataSeed: MetadataField[] = [
   { id: 'documentType', label: 'Document type', value: 'Annual Notice of Change', required: true, help: 'CMS model material category' },
   { id: 'planYear', label: 'Plan year', value: '2026', required: true, help: 'Required for model-year traceability' },
@@ -214,6 +233,9 @@ function App() {
   const [specReport, setSpecReport] = useState<SpecComparisonReport | null>(null)
   const [specStatus, setSpecStatus] = useState('Upload a marked-up SB spec PDF and compare it against the generated HTML.')
   const [isComparingSpec, setIsComparingSpec] = useState(false)
+  const [aiReview, setAiReview] = useState<AiSpecReviewReport | null>(null)
+  const [aiReviewStatus, setAiReviewStatus] = useState('Optional AI review is available when the backend has an AI model key configured.')
+  const [isAiReviewing, setIsAiReviewing] = useState(false)
   const [serverExport, setServerExport] = useState<ServerExportArtifact | null>(null)
   const [serverExportStatus, setServerExportStatus] = useState('Server PDF export is ready when the backend is available.')
   const [isExportingPdf, setIsExportingPdf] = useState(false)
@@ -274,6 +296,7 @@ function App() {
     setIsComparingSpec(true)
     setSpecStatus('Extracting spec PDF text and comparing against generated HTML...')
     setSpecReport(null)
+    setAiReview(null)
     try {
       const formData = new FormData()
       formData.append('spec_file', specFile)
@@ -290,6 +313,33 @@ function App() {
       setSpecStatus(error instanceof Error ? error.message : 'Unable to compare against the uploaded specification.')
     } finally {
       setIsComparingSpec(false)
+    }
+  }
+
+  const runAiSpecReview = async () => {
+    if (!specFile) {
+      setAiReviewStatus('Select the marked-up SB specification PDF before requesting AI review.')
+      return
+    }
+    setIsAiReviewing(true)
+    setAiReviewStatus('Requesting semantic AI review of the generated HTML against the uploaded specification...')
+    setAiReview(null)
+    try {
+      const formData = new FormData()
+      formData.append('spec_file', specFile)
+      formData.append('html', htmlExport)
+      const response = await fetch(apiUrl('/api/v1/specs/ai-review-html'), { method: 'POST', body: formData })
+      if (!response.ok) {
+        const detail = await response.text()
+        throw new Error(detail || `AI review failed with HTTP ${response.status}`)
+      }
+      const report = (await response.json()) as AiSpecReviewReport
+      setAiReview(report)
+      setAiReviewStatus(report.available ? `AI review completed with verdict: ${report.verdict.replace('_', ' ')}.` : report.summary)
+    } catch (error) {
+      setAiReviewStatus(error instanceof Error ? error.message : 'Unable to complete AI-assisted spec review.')
+    } finally {
+      setIsAiReviewing(false)
     }
   }
 
@@ -438,7 +488,9 @@ function App() {
               <input id="spec-file" type="file" accept="application/pdf,.pdf" onChange={(event) => setSpecFile(event.target.files?.[0] ?? null)} />
             </label>
             <button className="secondary-action" type="button" onClick={compareAgainstSpec} disabled={isComparingSpec}><SearchCheck size={18} aria-hidden="true" /> {isComparingSpec ? 'Comparing...' : 'Run spec match'}</button>
+            <button className="secondary-action ai-action" type="button" onClick={runAiSpecReview} disabled={isAiReviewing}><BrainCircuit size={18} aria-hidden="true" /> {isAiReviewing ? 'Reviewing...' : 'Run AI review'}</button>
             <p className="status-text" aria-live="polite">{specStatus}</p>
+            <p className="status-text" aria-live="polite">{aiReviewStatus}</p>
             {specReport && (
               <div className="spec-results">
                 <div className="score-grid compact-score">
@@ -462,6 +514,27 @@ function App() {
                   </details>
                 )}
                 <p className="review-note">{specReport.review_note}</p>
+              </div>
+            )}
+            {aiReview && (
+              <div className="spec-results ai-results">
+                <div className="score-grid compact-score">
+                  <span><strong>{aiReview.verdict.replace('_', ' ')}</strong> verdict</span>
+                  <span><strong>{Math.round(aiReview.confidence * 100)}%</strong> confidence</span>
+                </div>
+                <p><strong>{aiReview.available ? `AI model: ${aiReview.model ?? 'configured model'}` : 'AI unavailable'}.</strong> {aiReview.summary}</p>
+                {aiReview.findings.map((finding) => (
+                  <article key={`${finding.category}-${finding.issue}`} className={`issue ${finding.severity === 'critical' || finding.severity === 'major' ? 'warning' : 'passed'}`}>
+                    <BrainCircuit size={18} aria-hidden="true" />
+                    <div><strong>{finding.category}: {finding.issue}</strong><p>{finding.recommendation}{finding.evidence ? ` Evidence: ${finding.evidence}` : ''}</p></div>
+                  </article>
+                ))}
+                {aiReview.next_steps.length > 0 && (
+                  <details className="snippet-details" open>
+                    <summary>AI reviewer next steps ({aiReview.next_steps.length})</summary>
+                    {aiReview.next_steps.map((step) => <p key={step}>{step}</p>)}
+                  </details>
+                )}
               </div>
             )}
           </section>
